@@ -8,18 +8,17 @@ use std::{
     path::PathBuf,
     time::{Instant, SystemTime},
 };
-use tokio::fs::File;
-use tokio::io::duplex;
-use tokio::net::TcpStream;
-
-use config::ClientInfo;
+use tokio::{fs::File, io::duplex, net::TcpStream};
 
 pub const BUFFER_SIZE: usize = 1 << 16; // 64 KiB
 
 pub enum Mode {
-    Server, // Receives backups
-    Client, // Sends backups
-    Admin,  // Manages backups
+    // Operator mode
+    Server,
+    Client,
+
+    // Admin mode
+    Admin,
 }
 
 impl From<String> for Mode {
@@ -57,7 +56,7 @@ impl From<String> for SubMode {
 
 pub struct Client {
     pub hostname: String,
-    pub info: ClientInfo,
+    pub info: config::ClientInfo,
 }
 
 pub async fn handle_client(
@@ -65,17 +64,12 @@ pub async fn handle_client(
     mut stream: TcpStream,
     backup_dir: PathBuf,
 ) -> std::io::Result<()> {
-    // Verify client
     fsas::send_and_verify_challenge(&mut stream, &client.info.keypair.verifying_key).await?;
     log::debug!("Client {} verified", client.hostname);
 
-    // Authenticate to client
     fsas::receive_and_answer_challenge(&mut stream, &client.info.keypair.signing_key).await?;
     log::debug!("Authenticated to client {}", client.hostname);
 
-    // Receive, uncipher and compress data
-
-    // Initialize the file to write the compressed data
     let dirname = format!("{}/{}", backup_dir.to_str().unwrap(), client.hostname);
     let filename = format!(
         "{}/{}.lz4",
@@ -89,20 +83,18 @@ pub async fn handle_client(
     let mut file = File::create(filename).await?;
     log::trace!("Backfup file created for {}", client.hostname);
 
-    log::info!("Backup started for {}", client.hostname);
     let start = Instant::now();
+    log::info!("Backup started for {}", client.hostname);
 
-    // Process data as a stream
     let (mut tx, mut rx) = duplex(BUFFER_SIZE);
 
     let cipher_handle = tokio::spawn(async move {
-        fdgse::receive_ciphertext(&mut stream, &mut tx, client.info.cipher_key)
+        fdgse::decipher_stream(&mut stream, &mut tx, client.info.cipher_key)
             .await
             .expect("Error deciphering data");
     });
-
     let compress_handle = tokio::spawn(async move {
-        fce::compress_data(&mut rx, &mut file)
+        fce::compress_stream(&mut rx, &mut file)
             .await
             .expect("Error compressing data");
     });

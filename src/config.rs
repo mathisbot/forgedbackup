@@ -1,16 +1,11 @@
-use crate::fdgse::CipherKey;
-use crate::fsas::{SigningKey, VerifyingKey};
 use core::net::SocketAddr;
 use std::{collections::HashMap, path::PathBuf};
 use toml::Table;
 
-pub type Hostname = String;
+use crate::fdgse::CipherKey;
+use crate::fsas::KeyPair;
 
-#[derive(Clone)]
-pub struct KeyPair {
-    pub signing_key: SigningKey,
-    pub verifying_key: VerifyingKey,
-}
+pub type Hostname = String;
 
 #[derive(Clone)]
 pub struct ServerInfo {
@@ -36,11 +31,9 @@ pub struct ClientInfo {
 #[derive(Clone)]
 pub struct ServerConfig {
     pub listening_socker_addr: SocketAddr,
-    pub keys: HashMap<Hostname, ClientInfo>,
+    pub client_infos: HashMap<Hostname, ClientInfo>,
     pub backup_dir: PathBuf,
 }
-
-const DEFAULT_SERVER_SOCKET_ADDR: &str = "127.0.0.1:8080";
 
 impl ClientConfig {
     pub fn read(file_path: &str) -> Self {
@@ -80,7 +73,7 @@ impl ClientConfig {
             .map(|(name, addr)| {
                 let addr = addr
                     .as_str()
-                    .unwrap_or(DEFAULT_SERVER_SOCKET_ADDR)
+                    .unwrap()
                     .parse::<SocketAddr>()
                     .expect("Could not parse server socket address in configuration file");
                 ServerInfo {
@@ -157,7 +150,7 @@ impl ServerConfig {
             .parse::<PathBuf>()
             .expect("Could not parse backup_dir in configuration file");
 
-        let mut keys = HashMap::new();
+        let mut client_infos = HashMap::new();
 
         for entry in
             std::fs::read_dir(&signing_keys_dir).expect("Could not read signing keys directory")
@@ -172,7 +165,8 @@ impl ServerConfig {
                 .to_string();
             let signing_key = crate::fsas::read_signing_key(
                 &path.to_str().expect("Could not convert path to string"),
-            ).unwrap();
+            )
+            .unwrap();
             let verifying_key = {
                 let verifying_key_path = format!(
                     "{}/{}.pub",
@@ -194,7 +188,7 @@ impl ServerConfig {
                 );
                 crate::fdgse::read_key(&cipher_key_path)
             };
-            keys.insert(
+            client_infos.insert(
                 hostname,
                 ClientInfo {
                     keypair: KeyPair {
@@ -208,7 +202,7 @@ impl ServerConfig {
 
         return Self {
             listening_socker_addr: listening_socket_addr,
-            keys,
+            client_infos,
             backup_dir,
         };
     }

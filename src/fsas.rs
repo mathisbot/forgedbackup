@@ -7,16 +7,25 @@ use rand::{rngs::OsRng, RngCore};
 use std::{fs, io};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-const AUTHENTICATION_MESSAGE_LENGTH: usize = 512;
+const CHALLENGE_LENGTH: usize = 512;
 
-pub fn generate_keypair() -> (SigningKey, VerifyingKey) {
+#[derive(Clone)]
+pub struct KeyPair {
+    pub signing_key: SigningKey,
+    pub verifying_key: VerifyingKey,
+}
+
+pub fn generate_keypair() -> KeyPair {
     let mut csprng = OsRng {};
     let signing_key = SigningKey::generate(&mut csprng);
     let verifying_key = VerifyingKey::from(&signing_key);
     if verifying_key.is_weak() {
         panic!("The generated keypair is weak. Please regenerate the keypair.");
     }
-    (signing_key, verifying_key)
+    KeyPair {
+        signing_key,
+        verifying_key,
+    }
 }
 
 pub fn read_signing_key(bytes_file: &str) -> io::Result<SigningKey> {
@@ -42,7 +51,7 @@ fn verify_signature(
     verifying_key: &VerifyingKey,
     signature: &Signature,
     message: &[u8],
-) -> Result<(), std::io::Error> {
+) -> io::Result<()> {
     verifying_key
         .verify(message, signature)
         .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to authenticate the client"))
@@ -51,18 +60,15 @@ fn verify_signature(
 pub async fn send_and_verify_challenge(
     stream: &mut tokio::net::TcpStream,
     verifying_key: &VerifyingKey,
-) -> Result<(), std::io::Error> {
-    let mut challenge = [0u8; AUTHENTICATION_MESSAGE_LENGTH];
+) -> io::Result<()> {
+    let mut challenge = [0u8; CHALLENGE_LENGTH];
     OsRng {}.fill_bytes(&mut challenge[..]);
+    let mut signature = [0u8; SIGNATURE_LENGTH];
 
-    // Send the random message to the client
     stream.write_all(&challenge).await?;
 
-    // Receive the signature from the client
-    let mut signature = [0u8; SIGNATURE_LENGTH];
     stream.read_exact(&mut signature).await?;
 
-    // Verify the signature
     verify_signature(
         verifying_key,
         &Signature::from_bytes(&signature),
@@ -74,14 +80,11 @@ pub async fn receive_and_answer_challenge(
     stream: &mut tokio::net::TcpStream,
     signing_key: &SigningKey,
 ) -> Result<(), std::io::Error> {
-    // Receive the challenge from the server
-    let mut challenge = [0u8; AUTHENTICATION_MESSAGE_LENGTH];
+    let mut challenge = [0u8; CHALLENGE_LENGTH];
     stream.read_exact(&mut challenge).await?;
 
-    // Sign the challenge
     let signature = signing_key.sign(&challenge);
 
-    // Send the signature to the server
     stream.write_all(&signature.to_bytes()).await?;
 
     Ok(())

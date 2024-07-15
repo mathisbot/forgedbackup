@@ -3,9 +3,9 @@
 //! ForgedBackup is a tool written in Rust for creating and automating fast, secure backups.
 //!
 //! The architecture pays particular attention to optimization and safety.
-//! 
+//!
 //! Let's call "client" the server that wants to be backed up and "server" the server that actually hosts backups.
-//! 
+//!
 //! It's up to the client to decide when to initiate a backup.
 //! When it does:
 //! 1. It authenticates to the server, and the server authenticates itself to the client.
@@ -14,13 +14,12 @@
 //! 3. The client sends the files to be backed up to the server
 //! 4. The server compresseses them on the fly
 
-use std::io;
-use std::path::PathBuf;
+use std::{io, path::PathBuf};
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
+use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-use forgedbackup::config::{ClientInfo, KeyPair};
+use forgedbackup::config::ClientInfo;
 use forgedbackup::{config, fadc, fce, fdgse, fsas, Client};
 use forgedbackup::{Mode, SubMode};
 
@@ -32,15 +31,13 @@ async fn start_server(config: &config::ServerConfig) -> io::Result<()> {
         let (mut stream, peer_addr) = listener.accept().await?;
         log::debug!("Incoming connexion from {}", peer_addr);
 
-        // Receive hostname
         let mut hostname = [0u8; 256];
         stream.read(&mut hostname).await?;
         let hostname = String::from_utf8(hostname.to_vec()).unwrap();
         let hostname = hostname.trim_matches(char::from(0));
         log::trace!("Received hostname: {}", hostname);
 
-        // Get information about the client
-        let client_info = config.keys.get(hostname).expect("Client not found");
+        let client_info = config.client_infos.get(hostname).expect("Client not found");
         log::trace!("Client found: {}", hostname);
 
         let signing_key = client_info.keypair.signing_key.clone();
@@ -56,7 +53,7 @@ async fn start_server(config: &config::ServerConfig) -> io::Result<()> {
                     Client {
                         hostname,
                         info: ClientInfo {
-                            keypair: KeyPair {
+                            keypair: fsas::KeyPair {
                                 signing_key,
                                 verifying_key,
                             },
@@ -77,45 +74,39 @@ async fn start_server(config: &config::ServerConfig) -> io::Result<()> {
 async fn start_client(config: &config::ClientConfig) -> io::Result<()> {
     let mut backup_made = false;
 
-    let servers = config.servers.clone();
-
-    for server_info in servers {
+    for server_info in config.servers.clone() {
         let result: io::Result<()> = {
-            let mut stream = TcpStream::connect(server_info.addr).await?; 
+            let mut stream = TcpStream::connect(server_info.addr).await?;
             log::debug!("Connected to server {}.", server_info.hostname);
 
-            // Authentication process
-
-            // Send hostname
             stream.write_all(config.hostname.as_bytes()).await?;
             log::trace!("Hostname sent: {}", config.hostname);
 
-            // Authenticate to server
-            fsas::receive_and_answer_challenge(&mut stream, &server_info.keypair.signing_key).await?;
+            fsas::receive_and_answer_challenge(&mut stream, &server_info.keypair.signing_key)
+                .await?;
             log::debug!("Authenticated to server {}", server_info.hostname);
 
-            // Verify server
-            fsas::send_and_verify_challenge(&mut stream, &server_info.keypair.verifying_key).await?;
+            fsas::send_and_verify_challenge(&mut stream, &server_info.keypair.verifying_key)
+                .await?;
             log::debug!("Server {} verified", server_info.hostname);
 
-            // Sending process
-
-            log::info!("Starting backup on server {}", server_info.hostname);
             let start = std::time::Instant::now();
+            log::info!("Starting backup on server {}", server_info.hostname);
 
             let dir_path = config.backed_up_dir.clone();
             let (mut tx, mut rx) = duplex(forgedbackup::BUFFER_SIZE);
 
-            let file_reader_handle = tokio::spawn(async move {
-                fadc::dir_to_reader(dir_path, &mut tx).await.unwrap();
+            let dir_handle = tokio::spawn(async move {
+                fadc::read_dir(dir_path, &mut tx).await.unwrap();
+            });
+            let cipher_handle = tokio::spawn(async move {
+                fdgse::cipher_stream(&mut rx, &mut stream, &server_info.cipher_key)
+                    .await
+                    .unwrap();
             });
 
-            let uncipher_handle = tokio::spawn(async move {
-                fdgse::send_plaintext(&mut rx, &mut stream, server_info.cipher_key).await.unwrap();
-            });
-            
-            file_reader_handle.await?;
-            uncipher_handle.await?;
+            dir_handle.await?;
+            cipher_handle.await?;
 
             let duration = start.elapsed();
             log::info!(
@@ -130,9 +121,13 @@ async fn start_client(config: &config::ClientConfig) -> io::Result<()> {
         };
         match result {
             Err(e) => {
-                log::error!("Error while attempting to backup on {}: {}", server_info.hostname, e);
+                log::error!(
+                    "Error while attempting to backup on {}: {}",
+                    server_info.hostname,
+                    e
+                );
                 continue;
-            },
+            }
             Ok(_) => {}
         };
     }
@@ -147,7 +142,7 @@ async fn start_client(config: &config::ClientConfig) -> io::Result<()> {
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let mut builder = pretty_env_logger::formatted_builder();
-    builder.filter_module("forgedbackup", log::LevelFilter::Debug);
+    builder.filter_module("forgedbackup", log::LevelFilter::Info);
     builder.filter_module("tokio", log::LevelFilter::Warn);
     builder.init();
 
@@ -163,18 +158,23 @@ async fn main() -> std::io::Result<()> {
     match mode {
         Mode::Server => match submode {
             SubMode::Init => {
-                let (signing_key, verifying_key) = fsas::generate_keypair();
+                let fsas::KeyPair {
+                    signing_key,
+                    verifying_key,
+                } = fsas::generate_keypair();
+
                 let dest_dir = if args.len() >= 3 {
                     args[2].clone()
                 } else {
                     "./".to_string()
                 };
                 let dest_dir = std::path::Path::new(&dest_dir);
-                std::fs::create_dir_all(dest_dir)?;
+                tokio::fs::create_dir_all(dest_dir).await?;
+
                 let signing_key_path = dest_dir.join("ed25519");
                 let verifying_key_path = dest_dir.join("ed25519.pub");
-                std::fs::write(signing_key_path, signing_key.to_bytes())?;
-                std::fs::write(verifying_key_path, verifying_key.to_bytes())?;
+                tokio::fs::write(signing_key_path, signing_key.to_bytes()).await?;
+                tokio::fs::write(verifying_key_path, verifying_key.to_bytes()).await?;
             }
             SubMode::Start => {
                 let server_config = config::ServerConfig::read(&"config.toml");
@@ -184,22 +184,27 @@ async fn main() -> std::io::Result<()> {
         },
         Mode::Client => match submode {
             SubMode::Init => {
-                let (signing_key, verifying_key) = fsas::generate_keypair();
+                let fsas::KeyPair {
+                    signing_key,
+                    verifying_key,
+                } = fsas::generate_keypair();
+
                 let dest_dir = if args.len() == 3 {
                     args[2].clone()
                 } else {
                     "./".to_string()
                 };
                 let dest_dir = std::path::Path::new(&dest_dir);
-                std::fs::create_dir_all(dest_dir)?;
+                tokio::fs::create_dir_all(dest_dir).await?;
+
                 let signing_key_path = dest_dir.join("ed25519");
                 let verifying_key_path = dest_dir.join("ed25519.pub");
-                std::fs::write(signing_key_path, signing_key.to_bytes())?;
-                std::fs::write(verifying_key_path, verifying_key.to_bytes())?;
+                tokio::fs::write(signing_key_path, signing_key.to_bytes()).await?;
+                tokio::fs::write(verifying_key_path, verifying_key.to_bytes()).await?;
 
                 let key = fdgse::generate_key();
                 let key_path = dest_dir.join("key.aes");
-                std::fs::write(key_path, key)?;
+                tokio::fs::write(key_path, key).await?;
 
                 log::info!(
                     "Keys successfully generated in directory {}",
@@ -215,20 +220,9 @@ async fn main() -> std::io::Result<()> {
         Mode::Admin => match submode {
             SubMode::List => {
                 let server_config = config::ServerConfig::read(&"config.toml");
-                let backup_dir = std::fs::read_dir(server_config.backup_dir);
+                let mut backup_dir = tokio::fs::read_dir(server_config.backup_dir).await?;
 
-                let backup_dir = match backup_dir {
-                    Ok(backup_dir) => backup_dir,
-                    Err(e) if e.kind() == tokio::io::ErrorKind::NotFound => {
-                        panic!("Backup directory not found.");
-                    }
-                    Err(e) => {
-                        panic!("Error reading backup directory: {}", e);
-                    }
-                };
-
-                for server in backup_dir {
-                    let server = server?;
+                while let Some(server) = backup_dir.next_entry().await? {
                     let filename = server.file_name();
                     let filename = filename.to_str().unwrap();
                     println!("Backups for {}:", filename);
@@ -270,16 +264,21 @@ async fn main() -> std::io::Result<()> {
                 let server = args[3].clone();
                 let backup_dir = server_config.backup_dir.join(server);
 
-                let backup_number = args[4].parse::<usize>().expect("Invalid backup number");
+                let mut backup_number = args[4].parse::<usize>().expect("Invalid backup number");
 
-                let backups = std::fs::read_dir(&backup_dir)?;
+                let mut backups = tokio::fs::read_dir(&backup_dir).await.unwrap();
 
-                let backup = backups
-                    .enumerate()
-                    .find(|(i, _)| *i == backup_number)
-                    .expect("Backup not found")
-                    .1;
-                let backup = std::fs::read(backup?.path())?;
+                let mut backup = None;
+                while let Some(entry) = backups.next_entry().await? {
+                    let entry = entry;
+                    if backup_number == 0 {
+                        backup = Some(entry);
+                        break;
+                    }
+                    backup_number -= 1;
+                }
+
+                let backup = tokio::fs::read(backup.expect("Backup not found").path()).await?;
 
                 let output_dir = PathBuf::from(if args.len() == 6 {
                     args[5].clone()
@@ -290,10 +289,12 @@ async fn main() -> std::io::Result<()> {
                 let (mut tx, mut rx) = tokio::io::duplex(forgedbackup::BUFFER_SIZE);
 
                 let decompress_handle = tokio::spawn(async move {
-                    fce::decompress_data(&mut backup.as_slice(), &mut tx).await.unwrap();
+                    fce::decompress_stream(&mut backup.as_slice(), &mut tx)
+                        .await
+                        .unwrap();
                 });
                 let dir_handle = tokio::spawn(async move {
-                    fadc::reader_to_dir(&mut rx, output_dir).await.unwrap();
+                    fadc::write_dir(&mut rx, output_dir).await.unwrap();
                 });
 
                 decompress_handle.await?;

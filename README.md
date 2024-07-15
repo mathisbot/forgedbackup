@@ -6,7 +6,6 @@
 
 ForgedBackup is a tool written in Rust for creating and automating fast, secure backups.
 
-
 ![ForgedBackup Logo](.github/assets/logo.webp)
 
 ## Architecture
@@ -50,7 +49,7 @@ fSAS is a utility for securely authenticating a server when it connects, with th
 
 ForgedBackup takes advantage of the capabilities of modern processors, using multiple CPU cores to maximize performance.
 
-The majority of costly tasks are outsourced to the server, so as not to impact the normal operation of the source server. In particular, I have chosen to compress data after it has been sent, so that the client is only required to encrypt the data. It was therefore assumed that the connection between the two servers was not the limiting factor.
+The majority of costly tasks are outsourced to the server, so as not to impact the normal operation of the client. In particular, I have chosen to compress data after it has been sent, so that the client is only required to encrypt the data. It was therefore assumed that the connection between the two servers was not the limiting factor.
 
 In practice, the bottleneck is encryption/decryption.
 
