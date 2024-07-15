@@ -1,0 +1,5 @@
+listening_on="127.0.0.1:8080"
+signing_keys_dir="signing_keys"
+verifying_keys_dir="verifying_keys"
+cipher_keys_dir="cipher_keys"
+backup_dir="backups"
