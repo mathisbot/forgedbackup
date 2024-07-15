@@ -28,6 +28,8 @@ async fn crawl_dir(mut directory: ReadDir, tx: &mut DuplexStream) -> Result<(), 
                 let file = tokio::fs::File::open(&path).await?;
                 let mut src = tokio::io::BufReader::new(file);
 
+                log::debug!("Sending file: {:?}", path);
+
                 let mut buf = vec![0; BUFFER_SIZE];
                 loop {
                     let bytes_read = src.read(&mut buf).await?;
@@ -72,12 +74,14 @@ pub async fn reader_to_dir(
         } as usize;
 
         reader.read_exact(&mut file_path[..file_path_len]).await?;
-        let file_path = std::str::from_utf8(&file_path[..file_path_len]).unwrap();
+        let file_path = output_path.join(std::str::from_utf8(&file_path[..file_path_len]).unwrap());
+
+        log::debug!("Creating file: {:?}", file_path);
 
         let size = reader.read_u64_le().await? as usize;
-
-        tokio::fs::create_dir_all(output_path.join(file_path).parent().unwrap()).await?;
-        let mut file = tokio::fs::File::create(output_path.join(file_path)).await?;
+        
+        tokio::fs::create_dir_all(file_path.parent().unwrap()).await?;
+        let mut file = tokio::fs::File::create(&file_path).await?;
 
         let turn = size / BUFFER_SIZE;
         let remainder = size % BUFFER_SIZE;

@@ -1,10 +1,13 @@
 # ForgedBackup
 
-ForgedBackup is a tool written in Rust for creating and automating fast, secure backups.
-
 [![Contributors][contributors-shield]][contributors-url]
 [![Stargazers][stars-shield]][stars-url]
 [![Issues][issues-shield]][issues-url]
+
+ForgedBackup is a tool written in Rust for creating and automating fast, secure backups.
+
+
+![ForgedBackup Logo](.github/assets/logo.webp)
 
 ## Architecture
 
@@ -45,7 +48,7 @@ fSAS is a utility for securely authenticating a server when it connects, with th
 
 ## Performances
 
-fBUFS takes advantage of the capabilities of modern processors, using multiple CPU cores to maximize performance.
+ForgedBackup takes advantage of the capabilities of modern processors, using multiple CPU cores to maximize performance.
 
 The majority of costly tasks are outsourced to the server, so as not to impact the normal operation of the source server. In particular, I have chosen to compress data after it has been sent, so that the client is only required to encrypt the data. It was therefore assumed that the connection between the two servers was not the limiting factor.
 
@@ -75,7 +78,7 @@ In practice, the bottleneck is encryption/decryption.
 
 ### Usage
 
-First, make sure clients and servers are running the same version of fBUFS.
+First, make sure clients and servers are running the same version of ForgedBackup.
 
 Head over `example` if you want a quick example layout for both the client and the server workdir. Please do not copy/paste it in production because it contains private keys.
 
@@ -134,7 +137,7 @@ Each time you want to pair a client and a server, you will have to perform these
     # ...
     ```
 
-4. Run fBUFS
+4. Run ForgedBackup
 
     On the server :
     ```sh
@@ -165,14 +168,14 @@ Each time you want to pair a client and a server, you will have to perform these
 
 ### Linux service
 
-It is important to ensure that fBUFS is always ready to receive backups on the backup server. For this reason, its is recommended to create a service managed by systemd.
+It is important to ensure that ForgedBackup is always ready to receive backups on the backup server. For this reason, its is recommended to create a service managed by systemd.
 To do so, you can follow these steps:
 
 1. Create a new file at `/etc/systemd/system/forgedbackup.service` containing:
 
     ```plaintext
     [Unit]
-    Description=fBUFS
+    Description=ForgedBackup
     After=network.target
 
     [Service]
@@ -194,13 +197,13 @@ To do so, you can follow these steps:
     sudo systemctl daemon-reload
     ```
 
-5. Enable the fBUFS service to start on boot:
+5. Enable the ForgedBackup service to start on boot:
 
     ```sh
     sudo systemctl enable forgedbackup.service
     ```
 
-6. Start the fBUFS service:
+6. Start the ForgedBackup service:
 
     ```sh
     sudo systemctl start forgedbackup.service

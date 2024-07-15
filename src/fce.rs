@@ -1,5 +1,7 @@
 //! Forged Compression Engine (fCE)
 
+use std::mem::size_of;
+
 use lz4_flex::block::{compress_prepend_size, decompress_size_prepended};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -19,7 +21,7 @@ where
 
         let compressed = compress_prepend_size(&buffer[..bytes_read]);
 
-        let size = compressed.len() as u32;
+        let size = compressed.len();
         let size = &size.to_le_bytes();
 
         writer.write_all(size).await?;
@@ -35,27 +37,30 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let mut size_buffer = [0u8; 4]; // 4 bytes to read the size prefix
-    let mut buffer = [0u8; BUFFER_SIZE];
+    let mut size_buffer = [0u8; size_of::<usize>()]; // 4 bytes to read the size prefix
+    // If unlucky, compressed data can be larger than the original data
+    // So we allocate a vec instead of a fixed buffer
+    let mut buffer = Vec::with_capacity(BUFFER_SIZE);
 
     loop {
         if reader.read_exact(&mut size_buffer).await.is_err() {
             break;
         }
-        let size = u32::from_le_bytes(size_buffer) as usize;
+        let size = usize::from_le_bytes(size_buffer);
 
-        // Read the compressed data
-        // Size should be at most BUFFER_SIZE if the data was compressed using the above function
-        reader.read_exact(&mut buffer[..size]).await?;
-
-        // Decompress the data
-        let decompressed = decompress_size_prepended(&buffer[..size]).map_err(|e| {
+        buffer.resize(size, 0);
+        reader.read_exact(&mut buffer).await?;
+        
+        let decompressed = decompress_size_prepended(&buffer).map_err(|e| {
             log::error!("Decompression failed: {}", e);
             std::io::Error::new(std::io::ErrorKind::InvalidData, "Decompression failed")
         })?;
-
-        // Write the decompressed data
         writer.write_all(&decompressed).await?;
+
+        // Quickly clear the buffer
+        unsafe {
+            buffer.set_len(0);
+        }
     }
 
     Ok(())
