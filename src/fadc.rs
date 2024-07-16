@@ -15,9 +15,9 @@ async fn crawl_dir(mut directory: ReadDir, tx: &mut DuplexStream) -> Result<(), 
             if metadata.is_file() {
                 let path = entry.path();
                 let path_bytes = path.as_os_str().as_encoded_bytes();
-                
+
                 tx.write_u64_le(path_bytes.len() as u64).await?;
-                
+
                 tx.write_all(&path_bytes).await?;
 
                 let file_size = metadata.len();
@@ -80,25 +80,26 @@ pub async fn write_dir(
         reader.read_exact(&mut file_path[..file_path_len]).await?;
         let file_path = output_path.join(std::str::from_utf8(&file_path[..file_path_len]).unwrap());
 
-        let size = reader.read_u64_le().await? as usize;
+        let file_size = reader.read_u64_le().await? as usize;
 
         tokio::fs::create_dir_all(file_path.parent().unwrap()).await?;
-        let mut file = tokio::fs::File::create(&file_path).await?;
+        let file = tokio::fs::File::create(&file_path).await?;
+        let mut writer = tokio::io::BufWriter::new(file);
 
-        log::debug!("Writing file: {:?}", file_path);
-
-        let turn = size / BUFFER_SIZE;
-        let remainder = size % BUFFER_SIZE;
+        let turn = file_size / BUFFER_SIZE;
+        let remainder = file_size % BUFFER_SIZE;
 
         for _ in 0..turn {
             reader.read_exact(&mut buf).await?;
-            file.write_all(&buf).await?;
+            writer.write_all(&buf).await?;
         }
 
         if remainder > 0 {
-            reader.read_exact(&mut buf[..remainder as usize]).await?;
-            file.write_all(&buf[..remainder as usize]).await?;
+            reader.read_exact(&mut buf[..remainder]).await?;
+            writer.write_all(&buf[..remainder]).await?;
         }
+
+        writer.flush().await?;
     }
 
     Ok(())

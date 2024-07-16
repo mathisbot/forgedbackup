@@ -73,11 +73,11 @@ where
     W: AsyncWrite + Unpin,
 {
     let mut buffer = [0u8; BUFFER_SIZE + TAG_SIZE];
+    let mut nonce = [0u8; NONCE_SIZE];
     let cipher = Aes256Gcm::new(&key);
 
     loop {
         let nonce = {
-            let mut nonce = [0u8; NONCE_SIZE];
             let result = reader.read_exact(&mut nonce).await;
             match result {
                 Ok(_) => (),
@@ -88,24 +88,22 @@ where
             nonce
         };
 
-        let size = reader.read_u64_le().await?;
+        let size = reader.read_u64_le().await? as usize;
         if size == 0 {
             break;
         }
 
-        let bytes_read = reader.read_exact(&mut buffer[..size as usize]).await?;
+        let bytes_read = reader.read_exact(&mut buffer[..size]).await?;
         if bytes_read == 0 {
             break;
         }
 
         let nonce = Nonce::from_slice(&nonce);
 
-        let plain_text = cipher
-            .decrypt(&nonce, &buffer[..size as usize])
-            .map_err(|e| {
-                log::error!("Decryption failed: {}", e);
-                Error::new(InvalidData, "Decryption failed")
-            })?;
+        let plain_text = cipher.decrypt(&nonce, &buffer[..size]).map_err(|e| {
+            log::error!("Decryption failed: {}", e);
+            Error::new(InvalidData, "Decryption failed")
+        })?;
 
         writer.write_all(&plain_text).await?;
     }

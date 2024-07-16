@@ -34,8 +34,8 @@ where
     W: AsyncWrite + Unpin,
 {
     // If unlucky, compressed data can be slightly larger than the original data
-    // So we allocate a vec instead of a fixed-sized buffer
-    let mut buffer = Vec::with_capacity(BUFFER_SIZE);
+    // So we allocate a bigger buffer according to the worst case scenario (prepended size + header + data)
+    let mut buffer = [0u8; 4 + 258 + BUFFER_SIZE];
 
     loop {
         let result = reader.read_u64_le().await;
@@ -46,19 +46,13 @@ where
             Err(e) => return Err(e.into()),
         } as usize;
 
-        buffer.resize(size, 0);
-        reader.read_exact(&mut buffer).await?;
+        reader.read_exact(&mut buffer[..size]).await?;
 
-        let decompressed = decompress_size_prepended(&buffer).map_err(|e| {
+        let decompressed = decompress_size_prepended(&buffer[..size]).map_err(|e| {
             log::error!("Decompression failed: {}", e);
             std::io::Error::new(std::io::ErrorKind::InvalidData, "Decompression failed")
         })?;
         writer.write_all(&decompressed).await?;
-
-        // Quickly clear the buffer
-        unsafe {
-            buffer.set_len(0);
-        }
     }
 
     Ok(())

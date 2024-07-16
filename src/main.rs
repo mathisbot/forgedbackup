@@ -94,7 +94,7 @@ async fn start_client(config: &config::ClientConfig) -> io::Result<()> {
             log::info!("Starting backup on server {}", server_info.hostname);
 
             let dir_path = config.backed_up_dir.clone();
-            let (mut tx, mut rx) = duplex(forgedbackup::BUFFER_SIZE);
+            let (mut tx, mut rx) = duplex(forgedbackup::DUPLEX_BUFFER_SIZE);
 
             let dir_handle = tokio::spawn(async move {
                 fadc::read_dir(dir_path, &mut tx).await.unwrap();
@@ -142,9 +142,10 @@ async fn start_client(config: &config::ClientConfig) -> io::Result<()> {
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let mut builder = pretty_env_logger::formatted_builder();
-    builder.filter_module("forgedbackup", log::LevelFilter::Info);
-    builder.filter_module("tokio", log::LevelFilter::Warn);
-    builder.init();
+    builder
+        .filter_module("forgedbackup", log::LevelFilter::Info)
+        .filter_module("tokio", log::LevelFilter::Warn)
+        .init();
 
     let args = std::env::args().collect::<Vec<String>>();
 
@@ -286,7 +287,7 @@ async fn main() -> std::io::Result<()> {
                     "./decompressed".to_string()
                 });
 
-                let (mut tx, mut rx) = tokio::io::duplex(forgedbackup::BUFFER_SIZE);
+                let (mut tx, mut rx) = tokio::io::duplex(forgedbackup::DUPLEX_BUFFER_SIZE);
 
                 let decompress_handle = tokio::spawn(async move {
                     fce::decompress_stream(&mut backup.as_slice(), &mut tx)

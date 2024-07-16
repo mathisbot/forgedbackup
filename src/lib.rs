@@ -10,7 +10,10 @@ use std::{
 };
 use tokio::{fs::File, io::duplex, net::TcpStream};
 
-pub const BUFFER_SIZE: usize = 1 << 16; // 64 KiB
+// Buffer size doesn't seem to affect performances too much
+// However, it is clear that it affects compression ratio
+pub const BUFFER_SIZE: usize = 1 << 15; // 32 KiB
+pub const DUPLEX_BUFFER_SIZE: usize = 1 << 15; // 32 KiB
 
 pub enum Mode {
     // Operator mode
@@ -86,7 +89,7 @@ pub async fn handle_client(
     let start = Instant::now();
     log::info!("Backup started for {}", client.hostname);
 
-    let (mut tx, mut rx) = duplex(BUFFER_SIZE);
+    let (mut tx, mut rx) = duplex(DUPLEX_BUFFER_SIZE);
 
     let cipher_handle = tokio::spawn(async move {
         fdgse::decipher_stream(&mut stream, &mut tx, client.info.cipher_key)
