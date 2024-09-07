@@ -21,7 +21,7 @@ pub fn generate_keypair() -> KeyPair {
     let signing_key = SigningKey::generate(&mut csprng);
     let verifying_key = VerifyingKey::from(&signing_key);
     assert!(
-        verifying_key.is_weak(),
+        !verifying_key.is_weak(),
         "The generated keypair is weak. Please regenerate the keypair."
     );
     KeyPair {
