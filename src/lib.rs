@@ -1,3 +1,7 @@
+#![deny(clippy::all)]
+#![warn(clippy::nursery, clippy::pedantic)]
+#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
+
 pub mod config;
 pub mod fadc;
 pub mod fce;
@@ -24,13 +28,15 @@ pub enum Mode {
     Admin,
 }
 
-impl From<String> for Mode {
-    fn from(s: String) -> Self {
+impl TryFrom<String> for Mode {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
         match s.as_str() {
-            "s" | "server" => Mode::Server,
-            "c" | "client" => Mode::Client,
-            "a" | "admin" => Mode::Admin,
-            _ => panic!("Invalid mode"),
+            "s" | "server" => Ok(Self::Server),
+            "c" | "client" => Ok(Self::Client),
+            "a" | "admin" => Ok(Self::Admin),
+            _ => Err("Invalid mode".to_string()),
         }
     }
 }
@@ -45,14 +51,16 @@ pub enum SubMode {
     Decompress,
 }
 
-impl From<String> for SubMode {
-    fn from(s: String) -> Self {
+impl TryFrom<String> for SubMode {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
         match s.as_str() {
-            "i" | "init" => SubMode::Init,
-            "s" | "start" => SubMode::Start,
-            "l" | "list" => SubMode::List,
-            "dc" | "decompress" => SubMode::Decompress,
-            _ => panic!("Invalid submode"),
+            "i" | "init" => Ok(Self::Init),
+            "s" | "start" => Ok(Self::Start),
+            "l" | "list" => Ok(Self::List),
+            "dc" | "decompress" => Ok(Self::Decompress),
+            _ => Err("Invalid submode".to_string()),
         }
     }
 }
@@ -92,12 +100,16 @@ pub async fn handle_client(
     let (mut tx, mut rx) = duplex(DUPLEX_BUFFER_SIZE);
 
     let cipher_handle = tokio::spawn(async move {
-        fdgse::decipher_stream(&mut stream, &mut tx, client.info.cipher_key)
-            .await
-            .expect("Error deciphering data");
+        Box::pin(fdgse::decipher_stream(
+            &mut stream,
+            &mut tx,
+            client.info.cipher_key,
+        ))
+        .await
+        .expect("Error deciphering data");
     });
     let compress_handle = tokio::spawn(async move {
-        fce::compress_stream(&mut rx, &mut file)
+        Box::pin(fce::compress_stream(&mut rx, &mut file))
             .await
             .expect("Error compressing data");
     });

@@ -9,7 +9,7 @@
 //! It's up to the client to decide when to initiate a backup.
 //! When it does:
 //! 1. It authenticates to the server, and the server authenticates itself to the client.
-//! This is done so that your private data cannot be sent anywhere else than on the chosen servers, and that you don't accept data incoming from unknown servers.
+//!    This is done so that your private data cannot be sent anywhere else than on the chosen servers, and that you don't accept data incoming from unknown servers.
 //! 2. An encrypted pipe is opened, making sure that no one can eavesdrop on your private data.
 //! 3. The client sends the files to be backed up to the server
 //! 4. The server compresseses them on the fly
@@ -32,8 +32,8 @@ async fn start_server(config: &config::ServerConfig) -> io::Result<()> {
         log::debug!("Incoming connexion from {}", peer_addr);
 
         let mut hostname = [0u8; 256];
-        stream.read(&mut hostname).await?;
-        let hostname = String::from_utf8(hostname.to_vec()).unwrap();
+        let amount_read = stream.read(&mut hostname).await?;
+        let hostname = String::from_utf8(hostname[..amount_read].to_vec()).unwrap();
         let hostname = hostname.trim_matches(char::from(0));
         log::trace!("Received hostname: {}", hostname);
 
@@ -41,8 +41,8 @@ async fn start_server(config: &config::ServerConfig) -> io::Result<()> {
         log::trace!("Client found: {}", hostname);
 
         let signing_key = client_info.keypair.signing_key.clone();
-        let verifying_key = client_info.keypair.verifying_key.clone();
-        let cipher_key = client_info.cipher_key.clone();
+        let verifying_key = client_info.keypair.verifying_key;
+        let cipher_key = client_info.cipher_key;
         let hostname = hostname.to_string();
         let backup_dir = config.backup_dir.clone();
 
@@ -119,17 +119,14 @@ async fn start_client(config: &config::ClientConfig) -> io::Result<()> {
 
             Ok(())
         };
-        match result {
-            Err(e) => {
-                log::error!(
-                    "Error while attempting to backup on {}: {}",
-                    server_info.hostname,
-                    e
-                );
-                continue;
-            }
-            Ok(_) => {}
-        };
+
+        if let Err(e) = result {
+            log::error!(
+                "Error while attempting to backup on {}: {}",
+                server_info.hostname,
+                e
+            );
+        }
     }
 
     if !backup_made {
@@ -141,11 +138,7 @@ async fn start_client(config: &config::ClientConfig) -> io::Result<()> {
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let mut builder = pretty_env_logger::formatted_builder();
-    builder
-        .filter_module("forgedbackup", log::LevelFilter::Info)
-        .filter_module("tokio", log::LevelFilter::Warn)
-        .init();
+    pretty_env_logger::init();
 
     let args = std::env::args().collect::<Vec<String>>();
 
@@ -153,8 +146,8 @@ async fn main() -> std::io::Result<()> {
         panic!("Usage: {} <server|client|admin> <init|start>", args[0]);
     }
 
-    let mode = Mode::from(args[1].clone());
-    let submode = SubMode::from(args[2].clone());
+    let mode = Mode::try_from(args[1].clone()).expect("Invalid mode");
+    let submode = SubMode::try_from(args[2].clone()).expect("Invalid submode");
 
     match mode {
         Mode::Server => match submode {
@@ -178,7 +171,7 @@ async fn main() -> std::io::Result<()> {
                 tokio::fs::write(verifying_key_path, verifying_key.to_bytes()).await?;
             }
             SubMode::Start => {
-                let server_config = config::ServerConfig::read(&"config.toml");
+                let server_config = config::ServerConfig::read("config.toml");
                 start_server(&server_config).await?;
             }
             _ => panic!("Invalid submode for operator mode."),
@@ -213,14 +206,14 @@ async fn main() -> std::io::Result<()> {
                 );
             }
             SubMode::Start => {
-                let client_config = config::ClientConfig::read(&"config.toml");
+                let client_config = config::ClientConfig::read("config.toml");
                 start_client(&client_config).await?;
             }
             _ => panic!("Invalid submode for operator mode."),
         },
         Mode::Admin => match submode {
             SubMode::List => {
-                let server_config = config::ServerConfig::read(&"config.toml");
+                let server_config = config::ServerConfig::read("config.toml");
                 let mut backup_dir = tokio::fs::read_dir(server_config.backup_dir).await?;
 
                 while let Some(server) = backup_dir.next_entry().await? {
@@ -253,7 +246,7 @@ async fn main() -> std::io::Result<()> {
                 }
             }
             SubMode::Decompress => {
-                let server_config = config::ServerConfig::read(&"config.toml");
+                let server_config = config::ServerConfig::read("config.toml");
 
                 if args.len() < 5 {
                     panic!(
@@ -271,7 +264,6 @@ async fn main() -> std::io::Result<()> {
 
                 let mut backup = None;
                 while let Some(entry) = backups.next_entry().await? {
-                    let entry = entry;
                     if backup_number == 0 {
                         backup = Some(entry);
                         break;

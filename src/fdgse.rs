@@ -17,10 +17,12 @@ pub type CipherKey = Key<Aes256Gcm>;
 const NONCE_SIZE: usize = 12;
 const TAG_SIZE: usize = 16;
 
+#[must_use]
 pub fn generate_key() -> CipherKey {
     Aes256Gcm::generate_key(&mut OsRng)
 }
 
+#[must_use]
 pub fn read_key(key_path: &str) -> CipherKey {
     let key: &[u8; 32] = &std::fs::read(key_path)
         .expect("Could not read key file")
@@ -35,8 +37,8 @@ pub async fn cipher_stream<R, W>(
     key: &CipherKey,
 ) -> std::io::Result<()>
 where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
+    R: AsyncRead + Unpin + Send,
+    W: AsyncWrite + Unpin + Send,
 {
     let mut buffer = [0u8; BUFFER_SIZE];
     let cipher = Aes256Gcm::new(key);
@@ -69,8 +71,8 @@ pub async fn decipher_stream<R, W>(
     key: CipherKey,
 ) -> std::io::Result<()>
 where
-    R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
+    R: AsyncRead + Unpin + Send,
+    W: AsyncWrite + Unpin + Send,
 {
     let mut buffer = [0u8; BUFFER_SIZE + TAG_SIZE];
     let mut nonce = [0u8; NONCE_SIZE];
@@ -83,24 +85,21 @@ where
                 Ok(_) => (),
                 // Unexpected EOF means all data has been read
                 Err(e) if e.kind() == UnexpectedEof => break,
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(e),
             }
             nonce
         };
 
-        let size = reader.read_u64_le().await? as usize;
+        let size = usize::try_from(reader.read_u64_le().await?).expect("Size is too big");
         if size == 0 {
             break;
         }
 
-        let bytes_read = reader.read_exact(&mut buffer[..size]).await?;
-        if bytes_read == 0 {
-            break;
-        }
+        let _ = reader.read_exact(&mut buffer[..size]).await?;
 
         let nonce = Nonce::from_slice(&nonce);
 
-        let plain_text = cipher.decrypt(&nonce, &buffer[..size]).map_err(|e| {
+        let plain_text = cipher.decrypt(nonce, &buffer[..size]).map_err(|e| {
             log::error!("Decryption failed: {}", e);
             Error::new(InvalidData, "Decryption failed")
         })?;

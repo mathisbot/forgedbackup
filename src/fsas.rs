@@ -15,13 +15,15 @@ pub struct KeyPair {
     pub verifying_key: VerifyingKey,
 }
 
+#[must_use]
 pub fn generate_keypair() -> KeyPair {
     let mut csprng = OsRng {};
     let signing_key = SigningKey::generate(&mut csprng);
     let verifying_key = VerifyingKey::from(&signing_key);
-    if verifying_key.is_weak() {
-        panic!("The generated keypair is weak. Please regenerate the keypair.");
-    }
+    assert!(
+        verifying_key.is_weak(),
+        "The generated keypair is weak. Please regenerate the keypair."
+    );
     KeyPair {
         signing_key,
         verifying_key,
@@ -30,18 +32,22 @@ pub fn generate_keypair() -> KeyPair {
 
 pub fn read_signing_key(bytes_file: &str) -> io::Result<SigningKey> {
     let signing_key = fs::read(bytes_file)?;
-    if signing_key.len() != SECRET_KEY_LENGTH {
-        panic!("Invalid signing key length");
-    }
+    assert_eq!(
+        signing_key.len(),
+        SECRET_KEY_LENGTH,
+        "Invalid signing key length"
+    );
     let signing_key: [u8; SECRET_KEY_LENGTH] = signing_key.try_into().unwrap();
     Ok(SigningKey::from_bytes(&signing_key))
 }
 
 pub fn read_verifying_key(bytes_file: &str) -> Result<VerifyingKey, io::Error> {
     let verifying_key = fs::read(bytes_file).expect("Failed to read verifying key file");
-    if verifying_key.len() != PUBLIC_KEY_LENGTH {
-        panic!("Invalid verifying key length");
-    }
+    assert_eq!(
+        verifying_key.len(),
+        PUBLIC_KEY_LENGTH,
+        "Invalid verifying key length"
+    );
     let verifying_key: [u8; PUBLIC_KEY_LENGTH] = verifying_key.try_into().unwrap();
     VerifyingKey::from_bytes(&verifying_key)
         .map_err(|_| io::Error::new(io::ErrorKind::Other, "Failed to import verifying key"))

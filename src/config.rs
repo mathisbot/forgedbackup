@@ -15,6 +15,7 @@ pub struct ServerInfo {
     pub cipher_key: CipherKey,
 }
 
+#[allow(clippy::module_name_repetitions)]
 #[derive(Clone)]
 pub struct ClientConfig {
     pub servers: Vec<ServerInfo>,
@@ -28,6 +29,7 @@ pub struct ClientInfo {
     pub cipher_key: CipherKey,
 }
 
+#[allow(clippy::module_name_repetitions)]
 #[derive(Clone)]
 pub struct ServerConfig {
     pub listening_socker_addr: SocketAddr,
@@ -36,6 +38,10 @@ pub struct ServerConfig {
 }
 
 impl ClientConfig {
+    #[must_use]
+    // ## Panics
+    // This function panics if the configuration file is not found,
+    // or if the configuration file is not in the correct format.
     pub fn read(file_path: &str) -> Self {
         let config = std::fs::read_to_string(file_path)
             .expect("Could not read configuration file")
@@ -105,15 +111,19 @@ impl ClientConfig {
             .expect("Missing hostname in configuration file")
             .to_string();
 
-        return Self {
+        Self {
             servers,
             hostname,
             backed_up_dir,
-        };
+        }
     }
 }
 
 impl ServerConfig {
+    #[must_use]
+    // ## Panics
+    // This function panics if the configuration file is not found,
+    // or if the configuration file is not in the correct format.
     pub fn read(file_path: &str) -> Self {
         let config = std::fs::read_to_string(file_path)
             .expect("Could not read configuration file")
@@ -164,7 +174,7 @@ impl ServerConfig {
                 .expect("Could not convert file stem to string")
                 .to_string();
             let signing_key = crate::fsas::read_signing_key(
-                &path.to_str().expect("Could not convert path to string"),
+                path.to_str().expect("Could not convert path to string"),
             )
             .unwrap();
             let verifying_key = {
@@ -200,10 +210,10 @@ impl ServerConfig {
             );
         }
 
-        return Self {
+        Self {
             listening_socker_addr: listening_socket_addr,
             client_infos,
             backup_dir,
-        };
+        }
     }
 }
